@@ -13,12 +13,8 @@ import (
 )
 
 var (
-	a          int
-	num        int
 	Success    []string
-	hack       string
 	choice     string
-	running    bool
 	x          int
 	FILTER     []string
 	CATEGORIES []string
@@ -47,7 +43,7 @@ func start(a int) {
 		show1 = "No filter"
 		show2 = "All categories"
 	}
-	running = true
+	running := true
 	for running {
 		fmt.Printf("\n --> ")
 		in := bufio.NewReader(os.Stdin)
@@ -107,7 +103,7 @@ func get(c string, filter string, a int) (*goquery.Selection, string, error) {
 }
 
 func additionalFiltr(target *goquery.Selection, c string, a int) []string {
-	num = 1
+	num := 1
 	Success = nil
 	target.Find("td").Each(func(index int, item *goquery.Selection) {
 		//fmt.Println(item.Text())
@@ -120,7 +116,7 @@ func additionalFiltr(target *goquery.Selection, c string, a int) []string {
 			//fmt.Println(wa)
 			Success = append(Success, wa)
 		case 2:
-			hack = ""
+			hack := ""
 			item.Find("a").Each(func(i int, s *goquery.Selection) {
 				wa, _ := s.Attr("title")
 				hack = wa
@@ -143,7 +139,7 @@ func additionalFiltr(target *goquery.Selection, c string, a int) []string {
 }
 
 func process(search string, filter string) {
-	running = true
+	running := true
 	a := 1
 	loaded := []string{}
 	result := []string{}
@@ -159,7 +155,6 @@ func process(search string, filter string) {
 		a += 1
 		if len(result) != 4*75 {
 			running = false
-			break
 		}
 	}
 	max := len(loaded) / 120
@@ -177,7 +172,6 @@ func list(result []string, page int) {
 			fmt.Println(x+1, " == ", result[(x)*4+1])
 		} else {
 			fmt.Println("THE END")
-			break
 		}
 
 	}
