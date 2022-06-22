@@ -48,7 +48,6 @@ func start(a int) {
 		fmt.Printf("\n --> ")
 		in := bufio.NewReader(os.Stdin)
 		option, _ := in.ReadString('\n')
-		// command history
 		if strings.HasPrefix(option, "search ") {
 			process(option, filter)
 		} else if option == "exit\n" {
@@ -88,7 +87,6 @@ func get(c string, filter string, a int) (*goquery.Selection, string, error) {
 
 	searchString := "https://nyaa.si/?q=" + searchFor + filter + "&p=" + strconv.Itoa(a)
 
-	fmt.Println(searchString)
 	resp, err := http.Get(searchString)
 	if err != nil {
 		return nil, "", err
@@ -106,14 +104,12 @@ func additionalFiltr(target *goquery.Selection, c string, a int) []string {
 	num := 1
 	Success = nil
 	target.Find("td").Each(func(index int, item *goquery.Selection) {
-		//fmt.Println(item.Text())
 		if num == 9 {
 			num = 1
 		}
 		switch num {
 		case 1:
 			wa, _ := item.Find("a").Attr("title")
-			//fmt.Println(wa)
 			Success = append(Success, wa)
 		case 2:
 			hack := ""
@@ -121,12 +117,10 @@ func additionalFiltr(target *goquery.Selection, c string, a int) []string {
 				wa, _ := s.Attr("title")
 				hack = wa
 			})
-			//fmt.Println(hack)
 			Success = append(Success, hack)
 		case 3:
 			item.Find("a").Each(func(i int, s *goquery.Selection) {
 				wa, _ := s.Attr("href")
-				//fmt.Println(wa)
 				Success = append(Success, wa)
 			})
 		default:
@@ -134,7 +128,6 @@ func additionalFiltr(target *goquery.Selection, c string, a int) []string {
 		}
 		num += 1
 	})
-	//fmt.Println(Success)
 	return Success
 }
 
@@ -151,7 +144,6 @@ func process(search string, filter string) {
 
 		result = additionalFiltr(target, c, 1)
 		loaded = append(loaded, result...)
-		//fmt.Println(loaded)
 		a += 1
 		if len(result) != 4*75 {
 			running = false
@@ -172,18 +164,18 @@ func list(result []string, page int) {
 			fmt.Println(x+1, " == ", result[(x)*4+1])
 		} else {
 			fmt.Println("THE END")
+			break
 		}
 
 	}
-	fmt.Println("\nPage: ", page)
+	fmt.Println("\n Page: ", page)
 }
 
 func input(result []string, page int, max int) {
 	good := true
 	for good {
-		fmt.Println("MAX: ", max)
-		fmt.Printf("<-- (back) (next) -->")
-		fmt.Printf("\n (mpv) --> ")
+		fmt.Println(" MAX: ", max)
+		fmt.Printf(" <-- (back) (next) -->\n (mpv) --> ")
 		fmt.Scan(&choice)
 
 		if choice != "exit" {
