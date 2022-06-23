@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"os/exec"
@@ -19,9 +20,9 @@ var (
 	show2      string
 	filter     string
 	perPage    int
-	Success    []string
-	choice     string
-	x          int
+	//Success    []string
+	choice string
+	x      int
 )
 
 const HELP = `Options:
@@ -49,14 +50,10 @@ func mainShell() string {
 }
 
 func mainReader() string {
-	//running := true
-	//for running {
-	// a lot
 	fmt.Printf("\n --> ")
 	in := bufio.NewReader(os.Stdin)
 	option, _ := in.ReadString('\n')
 	return option
-	//}
 }
 
 func mainHandler(option string) (string, bool) {
@@ -91,6 +88,8 @@ func changeOptions() string {
 	fmt.Scan(&cat)
 	b := CATEGORIES[cat+23]
 	show2 = CATEGORIES[cat-1]
+	write := []byte(show1 + "\n" + show2 + "\n" + filter + "\n" + strconv.Itoa(perPage))
+	ioutil.WriteFile("settings", write, 0644)
 
 	return a + b
 }
@@ -137,7 +136,8 @@ func getPage(search string, a int) (*goquery.Selection, error) {
 
 func processPage(target *goquery.Selection) []string {
 	num := 1
-	Success = nil
+	Success := []string{}
+
 	target.Find("td").Each(func(index int, item *goquery.Selection) {
 		if num == 9 {
 			num = 1
@@ -186,13 +186,14 @@ func input(result []string, page int, max int) {
 	good := true
 	for good {
 		fmt.Printf(" MAX: %d\n <-- (back) (next) -->\n (mpv) --> ", max)
-		fmt.Scan(&choice)
+		in := bufio.NewReader(os.Stdin)
+		choice, _ := in.ReadString('\n')
 
-		if choice == "exit" {
+		if choice == "exit\n" {
 			main()
 		}
 
-		if choice == "next" {
+		if choice == "next\n" {
 			if page+1 > max {
 				list(result, page)
 				fmt.Println("end")
@@ -200,7 +201,7 @@ func input(result []string, page int, max int) {
 				page += 1
 				list(result, page)
 			}
-		} else if choice == "back" {
+		} else if choice == "back\n" {
 			if page-1 <= 0 {
 				list(result, page)
 				fmt.Println("end")
@@ -208,11 +209,11 @@ func input(result []string, page int, max int) {
 				page -= 1
 				list(result, page)
 			}
-		} else if choice == "clear" {
+		} else if choice == "clear\n" {
 			list(result, page)
 
 		} else {
-			choice, err := strconv.Atoi(choice)
+			choice, err := strconv.Atoi(strings.TrimSuffix(choice, "\n"))
 			if err != nil {
 				list(result, page)
 				fmt.Println("Incorrect input")
@@ -235,7 +236,6 @@ func input(result []string, page int, max int) {
 }
 
 func load() {
-	// to do | load setting from a file
 	FILTER = []string{"No filter", "No remakes", "Trusted only", "&f=0", "&f=1", "&f=2"}
 	CATEGORIES = []string{"All categories",
 		"Anime",
@@ -265,15 +265,27 @@ func load() {
 		"&c=2_0", "&c=2_1", "&c=2_2", "&c=3_0", "&c=3_1", "&c=3_2",
 		"&c=3_3", "&c=4_0", "&c=4_1", "&c=4_2", "&c=4_3", "&c=4_4",
 		"&c=5_0", "&c=5_1", "&c=1_2", "&c=6_0", "&c=6_1", "&c=6_2"}
-	show1 = "No filter"
-	show2 = "All categories"
-	filter = "&f=0&c=0_0"
-	perPage = 30
-
+	content, err := ioutil.ReadFile("settings")
+	if err != nil {
+		fmt.Printf("%s - Using default options.", err)
+		show1 = "No filter"
+		show2 = "All categories"
+		filter = "&f=0&c=0_0"
+		perPage = 30
+	} else {
+		arr := strings.Split(string(content), "\n")
+		show1 = arr[0]
+		show2 = arr[1]
+		filter = arr[2]
+		perPage, _ = strconv.Atoi(arr[3])
+		//it works™
+	}
+}
+func init() {
+	load()
 }
 
 func main() {
-	load()
 	search := mainShell()
 
 	loaded := get(search)
