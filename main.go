@@ -13,14 +13,15 @@ import (
 )
 
 var (
+	FILTER     []string
+	CATEGORIES []string
+	show1      string
+	show2      string
+	filter     string
+	perPage    int
 	Success    []string
 	choice     string
 	x          int
-	FILTER     []string
-	CATEGORIES []string
-	filter     string
-	show1      string
-	show2      string
 )
 
 const HELP = `Options:
@@ -38,32 +39,44 @@ help
 	Print this message
 `
 
-func start(a int) {
-	if a == 0 {
-		show1 = "No filter"
-		show2 = "All categories"
-	}
-	running := true
+func mainShell() string {
+	running, search := true, ""
 	for running {
-		fmt.Printf("\n --> ")
-		in := bufio.NewReader(os.Stdin)
-		option, _ := in.ReadString('\n')
-		if strings.HasPrefix(option, "search ") {
-			process(option, filter)
-		} else if option == "exit\n" {
-			running = false
-		} else if option == "filters\n" {
-			fmt.Println(show1, " ", show2, filter)
-		} else if option == "filters change\n" {
-			filter = change()
-		} else {
-			fmt.Println(HELP)
-		}
+		out := mainReader()
+		search, running = mainHandler(out)
+	}
+	return search
+}
 
+func mainReader() string {
+	//running := true
+	//for running {
+	// a lot
+	fmt.Printf("\n --> ")
+	in := bufio.NewReader(os.Stdin)
+	option, _ := in.ReadString('\n')
+	return option
+	//}
+}
+
+func mainHandler(option string) (string, bool) {
+	if strings.HasPrefix(option, "search ") {
+		return strings.Replace(strings.TrimSuffix(strings.TrimPrefix(option, "search"), "\n"), " ", "+", -1), false
+	} else if option == "options\n" {
+		fmt.Printf("%s %s %s", show1, show2, filter)
+		return "", true
+	} else if option == "options change\n" {
+		filter = changeOptions()
+		return "", true
+	} else if option == "exit\n" {
+		return "", false
+	} else {
+		fmt.Println(HELP)
+		return "", true
 	}
 }
 
-func change() string {
+func changeOptions() string {
 	var cat int
 	for x := 0; x < 3; x += 1 {
 		fmt.Println(x+1, " == ", FILTER[x])
@@ -82,25 +95,47 @@ func change() string {
 	return a + b
 }
 
-func get(c string, filter string, a int) (*goquery.Selection, string, error) {
-	searchFor := strings.Replace(strings.TrimSuffix(c, "\n"), " ", "+", -1)
+func get(search string) []string {
+	a := 1
+	loaded := []string{}
+	result := []string{}
 
-	searchString := "https://nyaa.si/?q=" + searchFor + filter + "&p=" + strconv.Itoa(a)
+	running := true
+	for running {
+		tbody, err := getPage(search, a)
+		if err != nil {
+			fmt.Println(err)
+		}
 
-	resp, err := http.Get(searchString)
+		result = processPage(tbody)
+		loaded = append(loaded, result...)
+		if len(result) != 4*75 {
+			running = false
+			break
+		}
+		a += 1
+	}
+	return loaded
+}
+
+func getPage(search string, a int) (*goquery.Selection, error) {
+
+	link := "https://nyaa.si/?q=" + search + filter + "&p=" + strconv.Itoa(a)
+	fmt.Println(link)
+	resp, err := http.Get(link)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
-	return doc.Find("tbody"), c, nil
+	return doc.Find("tbody"), nil
 }
 
-func additionalFiltr(target *goquery.Selection, c string, a int) []string {
+func processPage(target *goquery.Selection) []string {
 	num := 1
 	Success = nil
 	target.Find("td").Each(func(index int, item *goquery.Selection) {
@@ -131,116 +166,76 @@ func additionalFiltr(target *goquery.Selection, c string, a int) []string {
 	return Success
 }
 
-func process(search string, filter string) {
-	running := true
-	a := 1
-	loaded := []string{}
-	result := []string{}
-	for running {
-		target, c, err := get(strings.TrimPrefix(search, "search "), filter, a)
-		if err != nil {
-			fmt.Println(err)
-		}
-
-		result = additionalFiltr(target, c, 1)
-		loaded = append(loaded, result...)
-		a += 1
-		if len(result) != 4*75 {
-			running = false
-		}
-	}
-	max := len(loaded) / 120
-	fmt.Println("Max: ", max, len(loaded))
-	list(loaded, 1)
-	input(loaded, 1, max+1)
-}
-
 func list(result []string, page int) {
-	Clear()
+	clear()
 	leng := len(result) / 4
-	perPage := 30
+
 	for x = (page - 1) * perPage; x <= (page*perPage)-1; x += 1 {
 		if x < leng {
-			fmt.Println(x+1, " == ", result[(x)*4+1])
+			fmt.Printf(" %d == %s\n", x+1, result[(x)*4+1])
 		} else {
 			fmt.Println("THE END")
 			break
 		}
 
 	}
-	fmt.Println("\n Page: ", page)
+	fmt.Println(" Page: ", page)
 }
 
 func input(result []string, page int, max int) {
 	good := true
 	for good {
-		fmt.Println(" MAX: ", max)
-		fmt.Printf(" <-- (back) (next) -->\n (mpv) --> ")
+		fmt.Printf(" MAX: %d\n <-- (back) (next) -->\n (mpv) --> ", max)
 		fmt.Scan(&choice)
 
-		if choice != "exit" {
-			if choice == "next" {
-				if page+1 > max {
-					list(result, page)
-					fmt.Println("end")
-				} else {
-					page += 1
-					list(result, page)
-				}
-			} else if choice == "back" {
-				if page-1 <= 0 {
-					list(result, page)
-					fmt.Println("end")
-				} else {
-					page -= 1
-					list(result, page)
-				}
-			} else if choice == "clear" {
+		if choice == "exit" {
+			main()
+		}
+
+		if choice == "next" {
+			if page+1 > max {
 				list(result, page)
-
+				fmt.Println("end")
 			} else {
-				choice, err := strconv.Atoi(choice)
-				if err != nil {
-					list(result, page)
-					fmt.Println("Incorrect input")
-					input(result, page, max)
-				}
-
-				if choice <= 0 || choice > len(result)/4 {
-					list(result, page)
-					fmt.Println("Out of range")
-					input(result, page, max)
-				}
-
-				link := "https://nyaa.si" + result[(choice-1)*4+2]
-
-				go play(link)
+				page += 1
 				list(result, page)
 			}
+		} else if choice == "back" {
+			if page-1 <= 0 {
+				list(result, page)
+				fmt.Println("end")
+			} else {
+				page -= 1
+				list(result, page)
+			}
+		} else if choice == "clear" {
+			list(result, page)
+
 		} else {
-			good = false
-			start(1)
+			choice, err := strconv.Atoi(choice)
+			if err != nil {
+				list(result, page)
+				fmt.Println("Incorrect input")
+				input(result, page, max)
+			}
+
+			if choice <= 0 || choice > len(result)/4 {
+				list(result, page)
+				fmt.Println("Out of range")
+				input(result, page, max)
+			}
+
+			link := "https://nyaa.si" + result[(choice-1)*4+2]
+
+			go play(link)
+			list(result, page)
 		}
 
 	}
 }
 
-func play(link string) {
-	cmd := exec.Command("mpv", link)
-	err := cmd.Run()
-	if err != nil {
-		fmt.Println(err)
-	}
-}
-
-func Clear() {
-	//cmd := exec.Command("clear")
-	//cmd.Stdout = os.Stdout
-	//cmd.Run()
-	fmt.Print("\033[H\033[2J")
-}
-
-func main() {
+func load() {
+	// to do | load setting from a file
 	FILTER = []string{"No filter", "No remakes", "Trusted only", "&f=0", "&f=1", "&f=2"}
 	CATEGORIES = []string{"All categories",
 		"Anime",
@@ -270,7 +265,35 @@ func main() {
 		"&c=2_0", "&c=2_1", "&c=2_2", "&c=3_0", "&c=3_1", "&c=3_2",
 		"&c=3_3", "&c=4_0", "&c=4_1", "&c=4_2", "&c=4_3", "&c=4_4",
 		"&c=5_0", "&c=5_1", "&c=1_2", "&c=6_0", "&c=6_1", "&c=6_2"}
+	show1 = "No filter"
+	show2 = "All categories"
 	filter = "&f=0&c=0_0"
+	perPage = 30
 
-	start(0)
+}
+
+func main() {
+	load()
+	search := mainShell()
+
+	loaded := get(search)
+	max := len(loaded) / 120
+	//fmt.Println("Max: ", max, len(loaded))
+	list(loaded, 1)
+	input(loaded, 1, max+1)
+}
+
+func play(link string) {
+	cmd := exec.Command("mpv", link)
+	err := cmd.Run()
+	if err != nil {
+		fmt.Println(err)
+	}
+}
+
+func clear() {
+	//cmd := exec.Command("clear")
+	//cmd.Stdout = os.Stdout
+	//cmd.Run()
+	fmt.Print("\033[H\033[2J")
 }
