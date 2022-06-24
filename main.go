@@ -20,7 +20,7 @@ var (
 	show2      string
 	filter     string
 	perPage    int
-	state      int
+	appState   int
 	//Success    []string
 	choice string
 	x      int
@@ -44,14 +44,21 @@ help
 func mainShell(listControler chan string, result []string, waitForList chan bool) string {
 	running, search := true, ""
 	for running {
-		shell(waitForList)
-		search, running = mainReader(listControler, result, waitForList)
+		shellPrint(waitForList)
+
+		option := reader()
+		switch appState {
+		case 0:
+			search, running = normalHandler(option)
+		case 1:
+			mpvHandler(option, listControler, result, waitForList)
+		}
 	}
 	return search
 }
 
-func shell(waitForList chan bool) {
-	switch state {
+func shellPrint(waitForList chan bool) {
+	switch appState {
 	case 0:
 		fmt.Printf("\n >> ")
 	case 1:
@@ -60,34 +67,19 @@ func shell(waitForList chan bool) {
 	}
 }
 
-func mainReader(listControler chan string, result []string, waitForList chan bool) (string, bool) {
-	return mainHandler(reader(), listControler, result, waitForList)
-}
-
-func mainHandler(option string, listControler chan string, result []string, waitForList chan bool) (string, bool) {
-	switch state {
-	case 0:
-		return normalHandler(option)
-	case 1:
-		mpvHandler(option, listControler, result, waitForList)
-		return "", true
-	}
-	return "", false
-}
-
 func stringProcess(option string) string {
 	return strings.Replace(strings.TrimPrefix(option, "search"), " ", "+", -1)
 }
 
 func normalHandler(option string) (string, bool) {
 	if strings.HasPrefix(option, "search ") {
-		state = 1
+		appState = 1
 		return stringProcess(option), false
 	} else if option == "options" {
-		fmt.Printf("%s %s %s", show1, show2, filter)
+		options(1)
 		return "", true
 	} else if option == "options change" {
-		filter = changeOptions()
+		options(2)
 		return "", true
 	} else if option == "exit" {
 		os.Exit(0)
@@ -100,7 +92,7 @@ func normalHandler(option string) (string, bool) {
 func mpvHandler(choice string, listControler chan string, result []string, waitForList chan bool) {
 	if choice == "exit" {
 		close(listControler)
-		state = 0
+		appState = 0
 		main()
 	}
 
@@ -129,25 +121,32 @@ func mpvHandler(choice string, listControler chan string, result []string, waitF
 	}
 }
 
-func changeOptions() string {
-	var cat int
-	for x := 0; x < 3; x += 1 {
-		fmt.Println(x+1, " == ", FILTER[x])
-	}
-	fmt.Scan(&cat)
-	a := FILTER[cat+2]
-	show1 = FILTER[cat-1]
+func options(order int) {
+	switch order {
+	case 1:
+		fmt.Printf("%s %s %s %d", show1, show2, filter, perPage)
+	case 2:
+		var cat int
+		for x := 0; x < 3; x += 1 {
+			fmt.Println(x+1, " == ", FILTER[x])
+		}
+		fmt.Scan(&cat)
+		a := FILTER[cat+2]
+		show1 = FILTER[cat-1]
 
-	for x := 0; x < 24; x += 1 {
-		fmt.Println(x+1, " == ", CATEGORIES[x])
-	}
-	fmt.Scan(&cat)
-	b := CATEGORIES[cat+23]
-	show2 = CATEGORIES[cat-1]
-	write := []byte(show1 + "\n" + show2 + "\n" + a + b + "\n" + strconv.Itoa(perPage))
-	ioutil.WriteFile("settings", write, 0644)
+		for x := 0; x < 24; x += 1 {
+			fmt.Println(x+1, " == ", CATEGORIES[x])
+		}
+		fmt.Scan(&cat)
+		b := CATEGORIES[cat+23]
+		show2 = CATEGORIES[cat-1]
 
-	return a + b
+		writeToAFile(show1 + "\n" + show2 + "\n" + a + b + "\n" + strconv.Itoa(perPage))
+
+		filter = a + b
+
+	}
+
 }
 
 func get(search string, downloadChan chan *goquery.Selection, endChan chan bool) []string {
@@ -237,7 +236,7 @@ func list(result []string, listControler chan string, waitForList chan bool, pag
 	for cappa := range listControler {
 		page, err = controls(cappa, page, max)
 
-		clear()
+		clearScreen()
 
 		leng := len(result) / 4
 
@@ -332,7 +331,7 @@ func load() {
 }
 func init() {
 	load()
-	state = 0
+	appState = 0
 }
 
 func main() {
@@ -354,6 +353,11 @@ func once(listControler chan string) {
 	listControler <- "clear"
 }
 
+func writeToAFile(writeString string) {
+	write := []byte(writeString)
+	ioutil.WriteFile("settings", write, 0644)
+}
+
 func reader() string {
 	in := bufio.NewReader(os.Stdin)
 	choice, _ := in.ReadString('\n')
@@ -368,9 +372,6 @@ func play(link string) {
 	}
 }
 
-func clear() {
-	//cmd := exec.Command("clear")
-	//cmd.Stdout = os.Stdout
-	//cmd.Run()
+func clearScreen() {
 	fmt.Print("\033[H\033[2J")
 }
