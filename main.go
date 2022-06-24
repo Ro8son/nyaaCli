@@ -20,6 +20,7 @@ var (
 	show2      string
 	filter     string
 	perPage    int
+	state      int
 	//Success    []string
 	choice string
 	x      int
@@ -40,42 +41,91 @@ help
 	Print this message
 `
 
-func mainShell() string {
+func mainShell(listControler chan string, result []string, waitForList chan bool) string {
 	running, search := true, ""
 	for running {
-		out := mainReader()
-		search, running = mainHandler(out)
+		shell(waitForList)
+		search, running = mainReader(listControler, result, waitForList)
 	}
 	return search
 }
 
-func mainReader() string {
-	fmt.Printf("\n --> ")
-	return reader()
+func shell(waitForList chan bool) {
+	switch state {
+	case 0:
+		fmt.Printf("\n >> ")
+	case 1:
+		<-waitForList
+		fmt.Printf("\n (mpv) >> ")
+	}
+}
+
+func mainReader(listControler chan string, result []string, waitForList chan bool) (string, bool) {
+	return mainHandler(reader(), listControler, result, waitForList)
+}
+
+func mainHandler(option string, listControler chan string, result []string, waitForList chan bool) (string, bool) {
+	switch state {
+	case 0:
+		return normalHandler(option)
+	case 1:
+		mpvHandler(option, listControler, result, waitForList)
+		return "", true
+	}
+	return "", false
 }
 
 func stringProcess(option string) string {
-	return strings.Replace(strings.TrimSuffix(strings.TrimPrefix(option, "search"), "\n"), " ", "+", -1)
+	return strings.Replace(strings.TrimPrefix(option, "search"), " ", "+", -1)
 }
 
-func mainHandler(option string) (string, bool) {
+func normalHandler(option string) (string, bool) {
 	if strings.HasPrefix(option, "search ") {
-		if search := stringProcess(option); search == "" {
-			return " ", false
-		} else {
-			return stringProcess(option), false
-		}
-	} else if option == "options\n" {
+		state = 1
+		return stringProcess(option), false
+	} else if option == "options" {
 		fmt.Printf("%s %s %s", show1, show2, filter)
 		return "", true
-	} else if option == "options change\n" {
+	} else if option == "options change" {
 		filter = changeOptions()
 		return "", true
-	} else if option == "exit\n" {
-		return "", false
+	} else if option == "exit" {
+		os.Exit(0)
+	}
+	fmt.Println(HELP)
+	return "", true
+
+}
+
+func mpvHandler(choice string, listControler chan string, result []string, waitForList chan bool) {
+	if choice == "exit" {
+		close(listControler)
+		state = 0
+		main()
+	}
+
+	if choice == "next" {
+		listControler <- "next"
+	} else if choice == "back" {
+		listControler <- "back"
+	} else if choice == "clear" {
+		listControler <- "clear"
 	} else {
-		fmt.Println(HELP)
-		return "", true
+		choice, err := strconv.Atoi(choice)
+		if err != nil {
+			listControler <- "wrong input"
+			mainShell(listControler, result, waitForList)
+		}
+
+		if choice <= 0 || choice > len(result)/4 {
+			listControler <- "wrong input"
+			mainShell(listControler, result, waitForList)
+		}
+
+		link := "https://nyaa.si" + result[(choice-1)*4+2]
+
+		go play(link)
+		listControler <- "clear"
 	}
 }
 
@@ -128,7 +178,6 @@ func getPage(search string, downloadChan chan *goquery.Selection, endChan chan b
 		}
 
 		if end := <-endChan; end == false {
-			//downloadChan <- doc.Find("tbody")
 			close(downloadChan)
 			running = false
 		} else {
@@ -180,78 +229,59 @@ func processPage(downloadChan chan *goquery.Selection, endChan chan bool) []stri
 	return result
 }
 
-func list(result []string, page int) {
-	clear()
-	leng := len(result) / 4
+func list(result []string, listControler chan string, waitForList chan bool, page int) {
+	go once(listControler)
+	max := (len(result) / 120) + 1
+	var err bool
 
-	for x = (page - 1) * perPage; x <= (page*perPage)-1; x += 1 {
-		if x < leng {
-			fmt.Printf(" %d == %s\n", x+1, result[x*4+1])
-		} else {
-			fmt.Println("THE END")
-			break
-		}
+	for cappa := range listControler {
+		page, err = controls(cappa, page, max)
 
-	}
-	fmt.Println(" Page: ", page)
-}
+		clear()
 
-func input(result []string, page int) {
-	good := true
-	for good {
-		max := (len(result) / 120) + 1
-		fmt.Printf(" MAX: %d\n <-- (back) (next) -->\n (mpv) --> ", max)
-		choice := reader()
-		if choice == "exit\n" {
-			main()
-		}
+		leng := len(result) / 4
 
-		if choice == "next\n" {
-			if page+1 > max {
-				list(result, page)
-				fmt.Println("end")
+		for x := (page - 1) * perPage; x <= (page*perPage)-1; x += 1 {
+			if x < leng {
+				fmt.Printf(" %d == %s\n", x+1, result[x*4+1])
 			} else {
-				page += 1
-				list(result, page)
-			}
-		} else if choice == "back\n" {
-			if page-1 <= 0 {
-				list(result, page)
-				fmt.Println("end")
-			} else {
-				page -= 1
-				list(result, page)
-			}
-		} else if choice == "clear\n" {
-			list(result, page)
-
-		} else {
-			choice, err := strconv.Atoi(strings.TrimSuffix(choice, "\n"))
-			if err != nil {
-				list(result, page)
-				fmt.Println("Incorrect input")
-				input(result, page)
+				fmt.Println("THE END")
+				break
 			}
 
-			if choice <= 0 || choice > len(result)/4 {
-				list(result, page)
-				fmt.Println("Out of range")
-				input(result, page)
-			}
-
-			link := "https://nyaa.si" + result[(choice-1)*4+2]
-
-			go play(link)
-			list(result, page)
 		}
-
+		if err == true {
+			fmt.Println("Wrong input")
+		}
+		fmt.Println(" Page: ", page, "MAX ", max)
+		waitForList <- true
 	}
 }
 
-func reader() string {
-	in := bufio.NewReader(os.Stdin)
-	choice, _ := in.ReadString('\n')
-	return choice
+func controls(cappa string, page int, max int) (int, bool) {
+	switch cappa {
+	case "next":
+		if page+1 > max {
+			return page, false
+		} else {
+			fmt.Println("Page si", page)
+			page += 1
+			fmt.Println("Page si afer", page)
+			return page, false
+		}
+	case "back":
+		if page-1 < 1 {
+			return 1, false
+		} else {
+			page -= 1
+			return page, false
+		}
+	case "clear":
+		return page, false
+	case "wrong input":
+		return page, true
+	}
+	return 3, false
 }
 
 func load() {
@@ -302,20 +332,32 @@ func load() {
 }
 func init() {
 	load()
+	state = 0
 }
 
 func main() {
-	search := mainShell()
+	listControler := make(chan string)
+	loaded := []string{}
+	waitForList := make(chan bool)
+	for {
+		search := mainShell(listControler, loaded, waitForList)
 
-	if search != "" {
 		downloadChan := make(chan *goquery.Selection)
 		endChan := make(chan bool)
+		loaded = get(search, downloadChan, endChan)
 
-		loaded := get(search, downloadChan, endChan)
-
-		list(loaded, 1)
-		input(loaded, 1)
+		go list(loaded, listControler, waitForList, 1)
 	}
+}
+
+func once(listControler chan string) {
+	listControler <- "clear"
+}
+
+func reader() string {
+	in := bufio.NewReader(os.Stdin)
+	choice, _ := in.ReadString('\n')
+	return strings.TrimSuffix(choice, "\n")
 }
 
 func play(link string) {
