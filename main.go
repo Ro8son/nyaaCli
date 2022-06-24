@@ -28,10 +28,10 @@ var (
 const HELP = `Options:
 search <search string>
 
-filters
+options
 	List filters
 
-filters change
+options change
 	Change filters
 exit
 	Stop the program
@@ -51,14 +51,20 @@ func mainShell() string {
 
 func mainReader() string {
 	fmt.Printf("\n --> ")
-	in := bufio.NewReader(os.Stdin)
-	option, _ := in.ReadString('\n')
-	return option
+	return reader()
+}
+
+func stringProcess(option string) string {
+	return strings.Replace(strings.TrimSuffix(strings.TrimPrefix(option, "search"), "\n"), " ", "+", -1)
 }
 
 func mainHandler(option string) (string, bool) {
 	if strings.HasPrefix(option, "search ") {
-		return strings.Replace(strings.TrimSuffix(strings.TrimPrefix(option, "search"), "\n"), " ", "+", -1), false
+		if search := stringProcess(option); search == "" {
+			return " ", false
+		} else {
+			return stringProcess(option), false
+		}
 	} else if option == "options\n" {
 		fmt.Printf("%s %s %s", show1, show2, filter)
 		return "", true
@@ -88,82 +94,90 @@ func changeOptions() string {
 	fmt.Scan(&cat)
 	b := CATEGORIES[cat+23]
 	show2 = CATEGORIES[cat-1]
-	write := []byte(show1 + "\n" + show2 + "\n" + filter + "\n" + strconv.Itoa(perPage))
+	write := []byte(show1 + "\n" + show2 + "\n" + a + b + "\n" + strconv.Itoa(perPage))
 	ioutil.WriteFile("settings", write, 0644)
 
 	return a + b
 }
 
-func get(search string) []string {
-	a := 1
-	loaded := []string{}
-	result := []string{}
+func get(search string, downloadChan chan *goquery.Selection, endChan chan bool) []string {
 
+	go getPage(search, downloadChan, endChan)
+
+	result := processPage(downloadChan, endChan)
+	return result
+}
+
+//func errorCheck()
+
+func getPage(search string, downloadChan chan *goquery.Selection, endChan chan bool) {
 	running := true
+	a := 1
 	for running {
-		tbody, err := getPage(search, a)
+		link := "https://nyaa.si/?q=" + search + filter + "&p=" + strconv.Itoa(a)
+		fmt.Println(link)
+		resp, err := http.Get(link)
+		if err != nil {
+			fmt.Println(err)
+		}
+		defer resp.Body.Close()
+
+		doc, err := goquery.NewDocumentFromReader(resp.Body)
 		if err != nil {
 			fmt.Println(err)
 		}
 
-		result = processPage(tbody)
-		loaded = append(loaded, result...)
-		if len(result) != 4*75 {
+		if end := <-endChan; end == false {
+			//downloadChan <- doc.Find("tbody")
+			close(downloadChan)
 			running = false
-			break
+		} else {
+			downloadChan <- doc.Find("tbody")
 		}
 		a += 1
 	}
-	return loaded
 }
 
-func getPage(search string, a int) (*goquery.Selection, error) {
+func processPage(downloadChan chan *goquery.Selection, endChan chan bool) []string {
+	result := []string{}
+	endChan <- true
 
-	link := "https://nyaa.si/?q=" + search + filter + "&p=" + strconv.Itoa(a)
-	fmt.Println(link)
-	resp, err := http.Get(link)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	return doc.Find("tbody"), nil
-}
-
-func processPage(target *goquery.Selection) []string {
-	num := 1
-	Success := []string{}
-
-	target.Find("td").Each(func(index int, item *goquery.Selection) {
-		if num == 9 {
-			num = 1
-		}
-		switch num {
-		case 1:
-			wa, _ := item.Find("a").Attr("title")
-			Success = append(Success, wa)
-		case 2:
-			hack := ""
-			item.Find("a").Each(func(i int, s *goquery.Selection) {
-				wa, _ := s.Attr("title")
-				hack = wa
-			})
-			Success = append(Success, hack)
-		case 3:
-			item.Find("a").Each(func(i int, s *goquery.Selection) {
-				wa, _ := s.Attr("href")
+	for tbody := range downloadChan {
+		var Success []string
+		num := 1
+		tbody.Find("td").Each(func(index int, item *goquery.Selection) {
+			if num == 9 {
+				num = 1
+			}
+			switch num {
+			case 1:
+				wa, _ := item.Find("a").Attr("title")
 				Success = append(Success, wa)
-			})
-		default:
-			//fmt.Println(item.Text())
+			case 2:
+				hack := ""
+				item.Find("a").Each(func(i int, s *goquery.Selection) {
+					wa, _ := s.Attr("title")
+					hack = wa
+				})
+				Success = append(Success, hack)
+			case 3:
+				item.Find("a").Each(func(i int, s *goquery.Selection) {
+					wa, _ := s.Attr("href")
+					Success = append(Success, wa)
+				})
+			default:
+				//fmt.Println(item.Text())
+			}
+			num += 1
+		})
+		result = append(result, Success...)
+		if len(Success) == 75*4 {
+			endChan <- true
+		} else {
+			endChan <- false
 		}
-		num += 1
-	})
-	return Success
+	}
+	return result
 }
 
 func list(result []string, page int) {
@@ -172,7 +186,7 @@ func list(result []string, page int) {
 
 	for x = (page - 1) * perPage; x <= (page*perPage)-1; x += 1 {
 		if x < leng {
-			fmt.Printf(" %d == %s\n", x+1, result[(x)*4+1])
+			fmt.Printf(" %d == %s\n", x+1, result[x*4+1])
 		} else {
 			fmt.Println("THE END")
 			break
@@ -182,13 +196,12 @@ func list(result []string, page int) {
 	fmt.Println(" Page: ", page)
 }
 
-func input(result []string, page int, max int) {
+func input(result []string, page int) {
 	good := true
 	for good {
+		max := (len(result) / 120) + 1
 		fmt.Printf(" MAX: %d\n <-- (back) (next) -->\n (mpv) --> ", max)
-		in := bufio.NewReader(os.Stdin)
-		choice, _ := in.ReadString('\n')
-
+		choice := reader()
 		if choice == "exit\n" {
 			main()
 		}
@@ -217,13 +230,13 @@ func input(result []string, page int, max int) {
 			if err != nil {
 				list(result, page)
 				fmt.Println("Incorrect input")
-				input(result, page, max)
+				input(result, page)
 			}
 
 			if choice <= 0 || choice > len(result)/4 {
 				list(result, page)
 				fmt.Println("Out of range")
-				input(result, page, max)
+				input(result, page)
 			}
 
 			link := "https://nyaa.si" + result[(choice-1)*4+2]
@@ -233,6 +246,12 @@ func input(result []string, page int, max int) {
 		}
 
 	}
+}
+
+func reader() string {
+	in := bufio.NewReader(os.Stdin)
+	choice, _ := in.ReadString('\n')
+	return choice
 }
 
 func load() {
@@ -288,11 +307,15 @@ func init() {
 func main() {
 	search := mainShell()
 
-	loaded := get(search)
-	max := len(loaded) / 120
-	//fmt.Println("Max: ", max, len(loaded))
-	list(loaded, 1)
-	input(loaded, 1, max+1)
+	if search != "" {
+		downloadChan := make(chan *goquery.Selection)
+		endChan := make(chan bool)
+
+		loaded := get(search, downloadChan, endChan)
+
+		list(loaded, 1)
+		input(loaded, 1)
+	}
 }
 
 func play(link string) {
