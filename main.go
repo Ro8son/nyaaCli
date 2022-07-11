@@ -41,28 +41,22 @@ help
 	Print this message
 `
 
-func mainShell(listControler chan string, result []string, waitForList chan bool) string {
-	running, search := true, ""
-	for running {
-		shellPrint(waitForList)
+func mainShell(shellOutput chan string, waitForMain chan bool) {
+	for {
+		<- waitForMain
 
-		option := reader()
-		switch appState {
-		case 0:
-			search, running = normalHandler(option)
-		case 1:
-			mpvHandler(option, listControler, result, waitForList)
-		}
+		shellPrint()
+		 
+
+		shellOutput <- reader()
 	}
-	return search
 }
 
-func shellPrint(waitForList chan bool) {
+func shellPrint() {
 	switch appState {
 	case 0:
 		fmt.Printf("\n >> ")
 	case 1:
-		<-waitForList
 		fmt.Printf("\n (mpv) >> ")
 	}
 }
@@ -71,53 +65,59 @@ func stringProcess(option string) string {
 	return strings.Replace(strings.TrimPrefix(option, "search"), " ", "+", -1)
 }
 
-func normalHandler(option string) (string, bool) {
-	if strings.HasPrefix(option, "search ") {
-		appState = 1
-		return stringProcess(option), false
-	} else if option == "options" {
-		options(1)
-		return "", true
-	} else if option == "options change" {
-		options(2)
-		return "", true
-	} else if option == "exit" {
-		os.Exit(0)
-	}
-	fmt.Println(HELP)
-	return "", true
+func mainHandler(shellOutput chan string, waitForMain chan bool) {
+	waitForMain <- true
+	result := []string{}
+	page := 0
 
-}
+	for option := range shellOutput {
+		if strings.HasPrefix(option, "search ") {
+			appState = 1
+			result = get(stringProcess(option))
+			page = 1
+			list(result, page)
+		} else if option == "options" {
+			options(1)
+		} else if option == "options change" {
+			options(2)
+		} else if option == "exit" {
+			os.Exit(0)
+		} else if option == "next" {
+			if page + 1 > (len(result) / 120) + 1 {
+				list(result, page)
+			} else {
+				page+= 1
+				list(result, page)
+			}
+		} else if option == "back" {
+			if page - 1 < 1 {
+			list(result, page)
+			} else {
+				page -= 1
+				list(result, page)
+			}
+		} else if option == "clear" {
+			list(result, page)
+		} else {
+			if appState == 1 {
+				option, err := strconv.Atoi(choice)
+				if err != nil {
+					list(result, page)
+				}
 
-func mpvHandler(choice string, listControler chan string, result []string, waitForList chan bool) {
-	if choice == "exit" {
-		close(listControler)
-		appState = 0
-		main()
-	}
+				if option <= 0 || option > len(result)/4 {
+					list(result, page)
+				}
 
-	if choice == "next" {
-		listControler <- "next"
-	} else if choice == "back" {
-		listControler <- "back"
-	} else if choice == "clear" {
-		listControler <- "clear"
-	} else {
-		choice, err := strconv.Atoi(choice)
-		if err != nil {
-			listControler <- "wrong input"
-			mainShell(listControler, result, waitForList)
+				link := "https://nyaa.si" + result[(option-1)*4+2]
+
+				go play(link)
+				list(result, page)
+			} else {
+				fmt.Println(HELP)
+			}
 		}
-
-		if choice <= 0 || choice > len(result)/4 {
-			listControler <- "wrong input"
-			mainShell(listControler, result, waitForList)
-		}
-
-		link := "https://nyaa.si" + result[(choice-1)*4+2]
-
-		go play(link)
-		listControler <- "clear"
+		waitForMain <- true
 	}
 }
 
@@ -141,7 +141,7 @@ func options(order int) {
 		b := CATEGORIES[cat+23]
 		show2 = CATEGORIES[cat-1]
 
-		writeToAFile(show1 + "\n" + show2 + "\n" + a + b + "\n" + strconv.Itoa(perPage))
+		writeToFile(show1 + "\n" + show2 + "\n" + a + b + "\n" + strconv.Itoa(perPage))
 
 		filter = a + b
 
@@ -149,15 +149,15 @@ func options(order int) {
 
 }
 
-func get(search string, downloadChan chan *goquery.Selection, endChan chan bool) []string {
-
+func get(search string) []string {
+	downloadChan := make(chan *goquery.Selection) 
+	endChan := make(chan bool)
+	
 	go getPage(search, downloadChan, endChan)
 
 	result := processPage(downloadChan, endChan)
 	return result
 }
-
-//func errorCheck()
 
 func getPage(search string, downloadChan chan *goquery.Selection, endChan chan bool) {
 	running := true
@@ -228,59 +228,23 @@ func processPage(downloadChan chan *goquery.Selection, endChan chan bool) []stri
 	return result
 }
 
-func list(result []string, listControler chan string, waitForList chan bool, page int) {
-	go once(listControler)
+func list(result []string, page int) {
 	max := (len(result) / 120) + 1
-	var err bool
 
-	for cappa := range listControler {
-		page, err = controls(cappa, page, max)
+	clearScreen()
 
-		clearScreen()
+	leng := len(result) / 4
 
-		leng := len(result) / 4
-
-		for x := (page - 1) * perPage; x <= (page*perPage)-1; x += 1 {
-			if x < leng {
-				fmt.Printf(" %d == %s\n", x+1, result[x*4+1])
-			} else {
-				fmt.Println("THE END")
-				break
-			}
-
-		}
-		if err == true {
-			fmt.Println("Wrong input")
-		}
-		fmt.Println(" Page: ", page, "MAX ", max)
-		waitForList <- true
-	}
-}
-
-func controls(cappa string, page int, max int) (int, bool) {
-	switch cappa {
-	case "next":
-		if page+1 > max {
-			return page, false
+	for x := (page - 1) * perPage; x <= (page*perPage)-1; x += 1 {
+		if x < leng {
+			fmt.Printf(" %d == %s\n", x+1, result[x*4+1])
 		} else {
-			fmt.Println("Page si", page)
-			page += 1
-			fmt.Println("Page si afer", page)
-			return page, false
+			fmt.Println("THE END")
+			break
 		}
-	case "back":
-		if page-1 < 1 {
-			return 1, false
-		} else {
-			page -= 1
-			return page, false
-		}
-	case "clear":
-		return page, false
-	case "wrong input":
-		return page, true
+
 	}
-	return 3, false
+	fmt.Println(" Page: ", page, "MAX ", max)
 }
 
 func load() {
@@ -335,25 +299,16 @@ func init() {
 }
 
 func main() {
-	listControler := make(chan string)
-	loaded := []string{}
-	waitForList := make(chan bool)
-	for {
-		search := mainShell(listControler, loaded, waitForList)
+	shellOutput := make(chan string)
+	waitForMain := make(chan bool)
 
-		downloadChan := make(chan *goquery.Selection)
-		endChan := make(chan bool)
-		loaded = get(search, downloadChan, endChan)
+	go mainShell(shellOutput, waitForMain)
 
-		go list(loaded, listControler, waitForList, 1)
-	}
+	mainHandler(shellOutput, waitForMain)
+	
 }
 
-func once(listControler chan string) {
-	listControler <- "clear"
-}
-
-func writeToAFile(writeString string) {
+func writeToFile(writeString string) {
 	write := []byte(writeString)
 	ioutil.WriteFile("settings", write, 0644)
 }
